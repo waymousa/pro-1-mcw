@@ -21,16 +21,6 @@ Parameters:
     Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
     Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
   
-  FireHoseS3BufferSize:
-    Type: Number
-    Default: 5
-    Description: Enter the buffer size in MB for the Kinesis Firehose destination bucket.
-
-  FireHoseS3BufferTime:
-    Type: Number
-    Default: 300
-    Description: Enter the buffer time in seconds for the Kinesis Firehose destination bucket.
-
 Mappings: {}
 
 Conditions: {}
@@ -117,7 +107,7 @@ Resources:
       RouteTableId: !Ref PrivateRouteTable
       SubnetId: !Ref SN1
 
-  SnortSensor:
+  MineCraftServer:
     Type: 'AWS::EC2::Instance'
     Properties:
       NetworkInterfaces:
@@ -134,121 +124,18 @@ Resources:
       Tags: 
         - 
           Key: "Name"
-          Value: "SnortSensor"
+          Value: "MineCraftServer"
         - 
           Key: "SSMType"
-          Value: "SnortSensor"
+          Value: "MineCraftServer"
         - 
           Key: "SSMManaged"
           Value: "True"
       IamInstanceProfile: !Ref SSMInstanceProfile
 
-  TrafficGenerator:
-    Type: 'AWS::EC2::Instance'
-    Properties:
-      NetworkInterfaces:
-        - SubnetId: !Ref SN1
-          DeviceIndex: 0
-          GroupSet: 
-            - !Ref SG1
-      InstanceType: t2.medium
-      ImageId: !Ref LinuxImageId
-      UserData:
-        Fn::Base64: !Sub |
-          #!/bin/bash -xe
-          yum update -y
-      Tags: 
-        - 
-          Key: "Name"
-          Value: "TrafficGenerator"
-        - 
-          Key: "SSMType"
-          Value: "TrafficGenerator"
-        - 
-          Key: "SSMManaged"
-          Value: "True"
-      IamInstanceProfile: !Ref SSMInstanceProfile
-
-  SnortPacketData:
+  MineCraftServerData:
     Type: 'AWS::S3::Bucket'
     Properties: {}
-
-  SnortAlertData:
-    Type: 'AWS::S3::Bucket'
-    Properties: {}
-
-  SnortPacketStream:
-    Type: AWS::KinesisFirehose::DeliveryStream
-    Properties: 
-      DeliveryStreamName: aws-snort-demo-SnortPacketStream
-      S3DestinationConfiguration: 
-        BucketARN: !GetAtt SnortPacketData.Arn
-        BufferingHints: 
-          IntervalInSeconds: !Ref FireHoseS3BufferTime
-          SizeInMBs: !Ref FireHoseS3BufferSize
-        CompressionFormat: GZIP
-        RoleARN: !GetAtt KinesisIAMRole.Arn
-
-  SnortAlertStream:
-    Type: AWS::KinesisFirehose::DeliveryStream
-    Properties: 
-      DeliveryStreamName: aws-snort-demo-SnortAlertStream
-      S3DestinationConfiguration: 
-        BucketARN: !GetAtt SnortAlertData.Arn
-        BufferingHints: 
-          IntervalInSeconds: !Ref FireHoseS3BufferTime
-          SizeInMBs: !Ref FireHoseS3BufferSize
-        CompressionFormat: GZIP
-        RoleARN: !GetAtt KinesisIAMRole.Arn
-  
-  KinesisIAMRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          -
-            Effect: Allow
-            Principal:
-              Service: firehose.amazonaws.com
-            Action: 'sts:AssumeRole'
-  
-  KinesisIAMPolicy:
-    Type: AWS::IAM::Policy
-    Properties:
-      PolicyName: aws-snort-demo-kinesis-policy
-      PolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action:
-              - 's3:AbortMultipartUpload'
-              - 's3:GetBucketLocation'
-              - 's3:GetObject'
-              - 's3:ListBucket'
-              - 's3:ListBucketMultipartUploads'
-              - 's3:PutObject'
-            Resource:
-              - !Join 
-                - ''
-                - - 'arn:aws:s3:::'
-                  - !Ref SnortPacketData
-              - !Join 
-                - ''
-                - - 'arn:aws:s3:::'
-                  - !Ref SnortPacketData
-                  - '*'
-              - !Join 
-                - ''
-                - - 'arn:aws:s3:::'
-                  - !Ref SnortAlertData
-              - !Join 
-                - ''
-                - - 'arn:aws:s3:::'
-                  - !Ref SnortAlertData
-                  - '*'
-      Roles:
-        - !Ref KinesisIAMRole
   
   SSMInstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -356,26 +243,21 @@ Resources:
     Type: 'AWS::S3::Bucket'
     Properties: {}
 
-  AthenaQueryResultsBucket:
-    Type: 'AWS::S3::Bucket'
-    Properties: {}
-
-  SnortInstall:
+  MinecraftServerInstall:
     Type: 'AWS::SSM::Document'
     Properties:
       DocumentType: Automation
       Content:
         description: >-
-          # SnortInstallAndConfigure
+          # MinecraftServerInstallAndConfigure
 
-          This document sets up the EPEL repo and installs the Snort rpm's.  It then
-          moves on to download and deploy the community rules.
+          This document downsloads the Bedrock-Server from an S3 bucket and then unzips it the the /usr/bin/bedrock-server folder.
         schemaVersion: '0.3'
         parameters:
           InstanceId: 
             type: StringList
         mainSteps:
-          - name: InstallEPELRepo
+          - name: DownloadServerDistro
             action: 'aws:runCommand'
             inputs:
               DocumentName: AWS-RunShellScript
@@ -383,11 +265,10 @@ Resources:
                 - '{{InstanceId}}'
               Parameters:
                 commands: >-
-                  sudo yum install -y
-                  https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm
-            description: Install the EPEL repo from remote location.
+                  sudo wget -nv https://aws-snort-demo-artifacts.s3.amazonaws.com/bedrock-server-1.14.32.1.zip -O /var/tmp/bedrock-server-1.14.32.1.zip
+            description: Download the server from S3 bucket.
             onFailure: Continue
-          - name: InstallDAQrpm
+          - name: UnzipServerDistro
             action: 'aws:runCommand'
             inputs:
               DocumentName: AWS-RunShellScript
@@ -395,83 +276,35 @@ Resources:
                 - '{{InstanceId}}'
               Parameters:
                 commands: >-
-                  sudo yum install -y
-                  https://www.snort.org/downloads/archive/snort/daq-2.0.6-1.f21.x86_64.rpm
-            description: Installs the DAQ from the remote location.
-            onFailure: Continue
-          - name: InstallSnortrpm
-            action: 'aws:runCommand'
-            inputs:
-              DocumentName: AWS-RunShellScript
-              InstanceIds:
-                - '{{InstanceId}}'
-              Parameters:
-                commands: >-
-                  sudo yum install -y
-                  https://www.snort.org/downloads/archive/snort/snort-openappid-2.9.9.0-1.f21.x86_64.rpm
-            description: Installs the snort rpm
-            onFailure: Continue
-          - name: InstallCommunityRules
-            action: 'aws:runCommand'
-            inputs:
-              DocumentName: AWS-RunShellScript
-              Parameters:
-                commands:
-                  - >-
-                    sudo wget -nv
-                    https://www.snort.org/downloads/community/community-rules.tar.gz -O
-                    /var/tmp/community-rules.tar.gz
-                  - sudo gunzip -f /var/tmp/community-rules.tar.gz
-                  - sudo tar -C /var/tmp -xvf /var/tmp/community-rules.tar
-                  - sudo cp /var/tmp/community-rules/* /etc/snort/rules/
-              InstanceIds:
-                - '{{InstanceId}}'
-            description: Installs the community rules package.
-            onFailure: Continue
-          - name: CreateDirectories
-            action: 'aws:runCommand'
-            inputs:
-              DocumentName: AWS-RunShellScript
-              Parameters:
-                commands:
-                  - >-
-                    sudo mkdir /usr/local/lib/snort_dynamicrules
-                  - sudo chown -R snort:snort /usr/local/lib/snort_dynamicrules
-                  - sudo chmod 2775 /var/log/snort
-                  - sudo chmod u+s /var/log/snort
-              InstanceIds:
-                - '{{InstanceId}}'
-            description: Sets directory permissions and create directories.
+                  sudo mkdir /var/tmp/bedrock-server
+                  sudo mv /var/tmp/bedrock-server-1.14.32.1.zip /var/tmp/bedrock-server/
+                  sudo unzip /var/tmp/bedrock-server/bedrock-server-1.14.32.1.zip
+                  sudo cp -r /var/tmp/bedrock-server /usr/bin
+            description: Unzips the server to the correct folder.
             onFailure: Continue
 
-  SnortConfigure:
+  MineCraftStart:
     Type: 'AWS::SSM::Document'
     Properties:
       DocumentType: Automation
       Content:
         description: >-
-          # SnortInstallAndConfigure
+          # MineCraftStart
 
-          This document sets up all the custom configuration for snort.  It pulls the files from GitHub.
+          This document starts the MineCraft Server.
         schemaVersion: '0.3'
         parameters:
           InstanceId: 
             type: StringList
         mainSteps:
-          - name: ConfigureSnort
+          - name: StartMineCraftServer
             action: 'aws:runCommand'
             inputs:
               DocumentName: AWS-RunShellScript
               InstanceIds:
                 - '{{InstanceId}}'
               Parameters:
-                commands: 
-                  - >-
-                    sudo cp /home/ssm-user/aws-reinvent-2019-builders-session-opn215/etc/rc.d/init.d/snortd /etc/rc.d/init.d/snortd
-                  - sudo cp /home/ssm-user/aws-reinvent-2019-builders-session-opn215/etc/snort/snort.conf /etc/snort/snort.conf
-                  - sudo cp /home/ssm-user/aws-reinvent-2019-builders-session-opn215/etc/sysconfig/snort /etc/sysconfig/snort
-                  - sudo cp /home/ssm-user/aws-reinvent-2019-builders-session-opn215/etc/snort/rules/local.rules /etc/snort/rules/local.rules
-                  - sudo cp /home/ssm-user/aws-reinvent-2019-builders-session-opn215/etc/snort/rules/white_list.rules /etc/snort/rules/white_list.rules
-                  - sudo cp /home/ssm-user/aws-reinvent-2019-builders-session-opn215/etc/snort/rules/black_list.rules /etc/snort/rules/black_list.rules
-            description: Update all the Snort configuration files from GitHub repo.
-            onFailure: Continue
+                commands: >-
+                  sudo cd /usr/bin/bedrock-server
+                  sudo LD_LIBRARY_PATH=. ./bedrock_server
+            description: Starts the Minecraft Server
