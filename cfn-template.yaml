@@ -18,8 +18,9 @@ Parameters:
     Description: Enter a CIDR range for the VPC.
   
   LinuxImageId:
-    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
-    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+    Type: String
+    Default: ami-07ebfd5b3428b6f4d
+    Description: Ubuntuu Linux 18.0.
   
 Mappings: {}
 
@@ -35,22 +36,34 @@ Resources:
       CidrBlock: !Ref VPC1CidrBlock
       EnableDnsSupport: 'true'
       EnableDnsHostnames: 'true'
+      Tags:
+        - Key: Name
+          Value: minecraft-vpc
   
   SN1:
     Type: 'AWS::EC2::Subnet'
     Properties:
       VpcId: !Ref VPC1
       CidrBlock: !Ref SN1CidrBlock
+      Tags:
+        - Key: Name
+          Value: minecraft-prv-sn
 
   SN2:
     Type: 'AWS::EC2::Subnet'
     Properties:
       VpcId: !Ref VPC1
       CidrBlock: !Ref SN2CidrBlock
+      Tags:
+        - Key: Name
+          Value: minecraft-pub-sn
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
-    Properties: {}
+    Properties: 
+      Tags:
+        - Key: Name
+          Value: minecraft-igw
 
   InternetGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
@@ -69,11 +82,17 @@ Resources:
     Properties:
       AllocationId: !GetAtt EIP.AllocationId
       SubnetId: !Ref SN2
+      Tags:
+        - Key: Name
+          Value: minecraft-ngw
   
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC1
+      Tags: 
+        - Key: Name
+          Value: minecraft-pub-rt
   
   DefaultPublicRoute:
     Type: AWS::EC2::Route
@@ -233,6 +252,9 @@ Resources:
     Properties:
       GroupDescription: Allow all
       VpcId: !Ref VPC1
+      Tags:
+        - Key: Name
+          Value: minecraft-srv-sg
       SecurityGroupIngress:
       - IpProtocol: -1
         FromPort: -1
@@ -276,11 +298,9 @@ Resources:
                 - '{{InstanceId}}'
               Parameters:
                 commands: >-
-                  sudo mkdir /var/tmp/bedrock-server
-                  sudo mv /var/tmp/bedrock-server-1.14.32.1.zip /var/tmp/bedrock-server/
-                  sudo unzip /var/tmp/bedrock-server/bedrock-server-1.14.32.1.zip
-                  sudo cp -r /var/tmp/bedrock-server /usr/bin
-            description: Unzips the server to the correct folder.
+                  sudo apt-get install unzip
+                  sudo unzip /var/tmp/bedrock-server-1.14.32.1.zip -d /opt/bedrock-server
+            description: Unzips the server to /opt.
             onFailure: Continue
 
   MineCraftStart:
@@ -305,6 +325,6 @@ Resources:
                 - '{{InstanceId}}'
               Parameters:
                 commands: >-
-                  sudo cd /usr/bin/bedrock-server
+                  sudo cd /opt/bedrock-server
                   sudo LD_LIBRARY_PATH=. ./bedrock_server
             description: Starts the Minecraft Server
