@@ -54,6 +54,7 @@ Resources:
     Properties:
       VpcId: !Ref VPC1
       CidrBlock: !Ref SN2CidrBlock
+      MapPublicIpOnLaunch: True
       Tags:
         - Key: Name
           Value: minecraft-pub-sn
@@ -112,6 +113,9 @@ Resources:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC1
+      Tags: 
+        - Key: Name
+          Value: minecraft-prv-rt
   
   DefaultPrivateRoute:
     Type: AWS::EC2::Route
@@ -130,7 +134,7 @@ Resources:
     Type: 'AWS::EC2::Instance'
     Properties:
       NetworkInterfaces:
-        - SubnetId: !Ref SN1
+        - SubnetId: !Ref SN2
           DeviceIndex: 0
           GroupSet: 
             - !Ref SG1
