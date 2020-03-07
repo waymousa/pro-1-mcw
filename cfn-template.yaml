@@ -290,7 +290,7 @@ Resources:
                   sudo wget -nv https://aws-snort-demo-artifacts.s3.amazonaws.com/bedrock-server-1.14.32.1.zip -O /var/tmp/bedrock-server-1.14.32.1.zip
             description: Download the server from S3 bucket.
             onFailure: Continue
-          - name: UnzipServerDistro
+          - name: InstallExtraPackages
             action: 'aws:runCommand'
             inputs:
               DocumentName: AWS-RunShellScript
@@ -299,6 +299,16 @@ Resources:
               Parameters:
                 commands: >-
                   sudo apt-get install unzip
+            description: Unzips the server to /opt.
+            onFailure: Continue
+          - name: UnzipServerDistro
+            action: 'aws:runCommand'
+            inputs:
+              DocumentName: AWS-RunShellScript
+              InstanceIds:
+                - '{{InstanceId}}'
+              Parameters:
+                commands: >-
                   sudo unzip /var/tmp/bedrock-server-1.14.32.1.zip -d /opt/bedrock-server
             description: Unzips the server to /opt.
             onFailure: Continue
