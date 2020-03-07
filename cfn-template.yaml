@@ -152,6 +152,32 @@ Resources:
           Value: "True"
       IamInstanceProfile: !Ref SSMInstanceProfile
 
+  BastionHost:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      NetworkInterfaces:
+        - SubnetId: !Ref SN1
+          DeviceIndex: 0
+          GroupSet: 
+            - !Ref SG1
+      InstanceType: t2.medium
+      ImageId: !Ref LinuxImageId
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          yum update -y
+      Tags: 
+        - 
+          Key: "Name"
+          Value: "BastionHost"
+        - 
+          Key: "SSMType"
+          Value: "BastionHost"
+        - 
+          Key: "SSMManaged"
+          Value: "True"
+      IamInstanceProfile: !Ref SSMInstanceProfile
+
   MineCraftServerData:
     Type: 'AWS::S3::Bucket'
     Properties: {}
