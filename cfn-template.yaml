@@ -21,6 +21,11 @@ Parameters:
     Type: String
     Default: ami-07ebfd5b3428b6f4d
     Description: Ubuntuu Linux 18.0.
+
+  MountPoint:
+    Type: String
+    Default: "/opt/bedrock-server"
+    Description: Ubuntuu Linux 18.0.
   
 Mappings: {}
 
@@ -144,6 +149,8 @@ Resources:
         Fn::Base64: !Sub |
           #!/bin/bash -xe
           yum update -y
+          mkdir ${MountPoint}
+          mount -t nfs4 -o nfsvers=4.1 ${FileSystem}.efs.${AWS::Region}.amazonaws.com:/ /${MountPoint}
       Tags: 
         - 
           Key: "Name"
@@ -155,32 +162,7 @@ Resources:
           Key: "SSMManaged"
           Value: "True"
       IamInstanceProfile: !Ref SSMInstanceProfile
-
-  BastionHost:
-    Type: 'AWS::EC2::Instance'
-    Properties:
-      NetworkInterfaces:
-        - SubnetId: !Ref SN1
-          DeviceIndex: 0
-          GroupSet: 
-            - !Ref SG1
-      InstanceType: t2.medium
-      ImageId: !Ref LinuxImageId
-      UserData:
-        Fn::Base64: !Sub |
-          #!/bin/bash -xe
-          yum update -y
-      Tags: 
-        - 
-          Key: "Name"
-          Value: "BastionHost"
-        - 
-          Key: "SSMType"
-          Value: "BastionHost"
-        - 
-          Key: "SSMManaged"
-          Value: "True"
-      IamInstanceProfile: !Ref SSMInstanceProfile
+    DependsOn: MountTarget
 
   MineCraftServerData:
     Type: 'AWS::S3::Bucket'
@@ -207,7 +189,6 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM
         - arn:aws:iam::aws:policy/AmazonS3FullAccess
-        - arn:aws:iam::aws:policy/AmazonKinesisFirehoseFullAccess
 
   SSMEndPoint:
     Type: AWS::EC2::VPCEndpoint
@@ -309,6 +290,24 @@ Resources:
           InstanceId: 
             type: StringList
         mainSteps:
+          - name: InstallNgix
+            action: 'aws:runCommand'
+            inputs:
+              DocumentName: AWS-RunShellScript
+              InstanceIds:
+                - '{{InstanceId}}'
+              Parameters:
+                commands: >-
+                  sudo wget http://nginx.org/keys/nginx_signing.key
+                  sudo apt-key add nginx_signing.key
+                  cd /etc/apt
+                  echo "deb http://nginx.org/packages/ubuntu xenial nginx" | sudo tee -a /etc/apt/sources.list
+                  echo "deb-src http://nginx.org/packages/ubuntu xenial nginx" | sudo tee -a /etc/apt/sources.list
+                  sudo apt-get update
+                  sudo apt-get install nginx
+                  sudo service nginx start
+            description: Download and install nginx
+            onFailure: Continue
           - name: DownloadServerDistro
             action: 'aws:runCommand'
             inputs:
@@ -339,7 +338,7 @@ Resources:
                 - '{{InstanceId}}'
               Parameters:
                 commands: >-
-                  sudo unzip /var/tmp/bedrock-server-1.14.32.1.zip -d /opt/bedrock-server
+                  sudo unzip /var/tmp/bedrock-server-1.14.32.1.zip -d ${MountPoint}
             description: Unzips the server to /opt.
             onFailure: Continue
 
@@ -365,6 +364,70 @@ Resources:
                 - '{{InstanceId}}'
               Parameters:
                 commands: >-
-                  sudo cd /opt/bedrock-server
+                  sudo cd ${MountPoint}
                   sudo LD_LIBRARY_PATH=. ./bedrock_server
             description: Starts the Minecraft Server
+
+  MountTargetSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId:
+        Ref: VPC1
+      GroupDescription: Security group for mount target
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '2049'
+          ToPort: '2049'
+          CidrIp: 0.0.0.0/0
+
+  FileSystem:
+    Type: AWS::EFS::FileSystem
+    Properties:
+      PerformanceMode: generalPurpose
+      FileSystemTags:
+        - Key: Name
+          Value: minecraft-server-efs
+
+  MountTarget:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId:
+        Ref: FileSystem
+      SubnetId:
+        Ref: SN2
+      SecurityGroups:
+        - Ref: MountTargetSecurityGroup
+
+  MineCraftELB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties: 
+      Name: minecraft-elb
+      Subnets: 
+        - !Ref SN2
+      Type: network
+      Tags:
+        - Key: Name
+          Value: minecraft-elb
+
+  LoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref MineCraftELB
+      Port: 19132
+      Protocol: UDP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref DefaultTargetGroup
+  
+  DefaultTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: minecraft-tg
+      VpcId: !Ref VPC1
+      Port: 19132
+      Protocol: UDP
+      HealthCheckPort: 80
+      HealthCheckProtocol: TCP
+      Targets: 
+        - Id: !Ref MineCraftServer
+          Port: 19132
