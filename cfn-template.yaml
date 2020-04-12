@@ -148,9 +148,11 @@ Resources:
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash -xe
-          yum update -y
+          apt-get update
+          apt-get upgrade -y
+          apt-get install nfs-common -y
           mkdir ${MountPoint}
-          mount -t nfs4 -o nfsvers=4.1 ${FileSystem}.efs.${AWS::Region}.amazonaws.com:/ /${MountPoint}
+          mount -t nfs4 -o nfsvers=4.1 ${FileSystem}.efs.${AWS::Region}.amazonaws.com:/ ${MountPoint}
       Tags: 
         - 
           Key: "Name"
@@ -297,15 +299,16 @@ Resources:
               InstanceIds:
                 - '{{InstanceId}}'
               Parameters:
-                commands: >-
-                  sudo wget http://nginx.org/keys/nginx_signing.key
-                  sudo apt-key add nginx_signing.key
-                  cd /etc/apt
-                  echo "deb http://nginx.org/packages/ubuntu xenial nginx" | sudo tee -a /etc/apt/sources.list
-                  echo "deb-src http://nginx.org/packages/ubuntu xenial nginx" | sudo tee -a /etc/apt/sources.list
-                  sudo apt-get update
-                  sudo apt-get install nginx
-                  sudo service nginx start
+                commands: 
+                  - >-
+                    sudo wget http://nginx.org/keys/nginx_signing.key
+                  - sudo apt-key add nginx_signing.key
+                  - cd /etc/apt
+                  - echo "deb http://nginx.org/packages/ubuntu xenial nginx" | sudo tee -a /etc/apt/sources.list
+                  - echo "deb-src http://nginx.org/packages/ubuntu xenial nginx" | sudo tee -a /etc/apt/sources.list
+                  - sudo apt-get update
+                  - sudo apt-get install nginx -y
+                  - sudo service nginx start
             description: Download and install nginx
             onFailure: Continue
           - name: DownloadServerDistro
@@ -327,7 +330,7 @@ Resources:
                 - '{{InstanceId}}'
               Parameters:
                 commands: >-
-                  sudo apt-get install unzip
+                  sudo apt-get install unzip -y
             description: Unzips the server to /opt.
             onFailure: Continue
           - name: UnzipServerDistro
@@ -338,7 +341,7 @@ Resources:
                 - '{{InstanceId}}'
               Parameters:
                 commands: >-
-                  sudo unzip /var/tmp/bedrock-server-1.14.32.1.zip -d ${MountPoint}
+                  sudo unzip /var/tmp/bedrock-server-1.14.32.1.zip -d /opt/bedrock-server
             description: Unzips the server to /opt.
             onFailure: Continue
 
@@ -363,9 +366,10 @@ Resources:
               InstanceIds:
                 - '{{InstanceId}}'
               Parameters:
-                commands: >-
-                  sudo cd ${MountPoint}
-                  sudo LD_LIBRARY_PATH=. ./bedrock_server
+                commands: 
+                  - >-
+                    sudo cd /opt/bedrock-server
+                  - sudo LD_LIBRARY_PATH=. ./bedrock_server
             description: Starts the Minecraft Server
 
   MountTargetSecurityGroup:
