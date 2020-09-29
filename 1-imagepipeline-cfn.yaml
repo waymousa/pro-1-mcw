@@ -1,0 +1,202 @@
+AWSTemplateFormatVersion: 2010-09-09
+# Added a comment for the first time.
+
+Resources:
+
+  SSMLoggingBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties: {}
+
+  BedRockMinecraftServerImageRecipe:
+    Type: AWS::ImageBuilder::ImageRecipe
+    Properties:
+      ParentImage: arn:aws:imagebuilder:us-east-1:aws:image/ubuntu-server-18-lts-x86/2020.7.30
+      Name: BedRockMinecraftImageRecipe
+      Version: "1.0.0"
+      Description: "BedRock Minecraft Server image recipe."
+      Components: 
+        - ComponentArn: !Ref NginxComponent
+        - ComponentArn: !Ref BedRockMinecraftServerComponent
+        - ComponentArn: !Ref CodeDeployAgentComponent
+
+  BedRockMinecraftServerComponent:
+    Type: AWS::ImageBuilder::Component
+    Properties:
+      Name: BedRockMineCraftServer
+      Platform: Linux
+      Version: "1.0.0"
+      Description: "Installs the BedRock Minecraft Server."
+      ChangeDescription: "Initial"
+      Data: |
+        name: BedRockMinecraftServerDoc - InlineData
+        description: This is the EPEL Repo installation Document
+        schemaVersion: 1.0
+ 
+        phases:
+          - name: build
+            steps:
+              - name: BuildBedRockMinecraftServer
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - >-
+                      sudo wget -nv https://aws-snort-demo-artifacts.s3.amazonaws.com/bedrock-server-1.16.40.02.zip -O /var/tmp/bedrock-server-1.16.40.02.zip
+                    - sudo apt-get install unzip -y
+                    - sudo unzip /var/tmp/bedrock-server-1.16.40.02.zip -d /opt/bedrock-server
+          - name: validate
+            steps:
+              - name: ValidateBedRockMinecraftServer
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - echo "ValidateBedRockMinecraftServer"
+          - name: test
+            steps:
+              - name: ValidateBedRockMinecraftServer
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - echo "ValidateBedRockMinecraftServer"
+
+ 
+  NginxComponent:
+    Type: AWS::ImageBuilder::Component
+    Properties:
+      Name: NginxComponent
+      Platform: Linux
+      Version: "1.0.0"
+      Description: "Installs the Nginx package for Linux."
+      ChangeDescription: "Initial"
+      Data: |
+        name: NginxDoc - InlineData
+        description: This is the Nginx installation document
+        schemaVersion: 1.0
+ 
+        phases:
+          - name: build
+            steps:
+              - name: BuildNginx
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - >-
+                      sudo wget http://nginx.org/keys/nginx_signing.key
+                    - sudo apt-key add nginx_signing.key
+                    - cd /etc/apt
+                    - echo "deb http://nginx.org/packages/ubuntu xenial nginx" | sudo tee -a /etc/apt/sources.list
+                    - echo "deb-src http://nginx.org/packages/ubuntu xenial nginx" | sudo tee -a /etc/apt/sources.list
+                    - sudo apt-get update
+                    - sudo apt-get install nginx -y
+                    - sudo service nginx start
+          - name: validate
+            steps:
+              - name: ValidateNginx
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - echo "ValidateNginx"
+          - name: test
+            steps:
+              - name: TestNginx
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - echo "TestNginx"
+
+  CodeDeployAgentComponent:
+    Type: AWS::ImageBuilder::Component
+    Properties:
+      Name: CodeDeployAgentComponent
+      Platform: Linux
+      Version: "1.0.0"
+      Description: "Installs the Code Deploy package for Linux."
+      ChangeDescription: "Initial"
+      Data: |
+        name: CodeDeployAgentDoc - InlineData
+        description: This is the Code Deploy agent installation document
+        schemaVersion: 1.0
+ 
+        phases:
+          - name: build
+            steps:
+              - name: BuildCodeDeployrpm
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - >-
+                      sudo yum install -y ruby
+                    - sudo yum install -y aws-cli
+                    - sudo aws s3 cp s3://aws-codedeploy-us-east-2/latest/install /home/ec2-user --region us-east-2
+                    - sudo chmod +x /home/ec2-user/install
+                    - sudo /home/ec2-user/install auto
+          - name: validate
+            steps:
+              - name: ValidateCodeDeployrpm
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - echo "ValidateCodeDeployrpm"
+          - name: test
+            steps:
+              - name: TestCodeDeployrpm
+                action: ExecuteBash
+                inputs:
+                  commands:
+                    - echo "TestCodeDeployrpm"
+  
+  BedRockMinercraftInfrastructureConfiguration:
+    Type: AWS::ImageBuilder::InfrastructureConfiguration
+    Properties:
+      InstanceProfileName: ImageBuilderInstanceProfile
+      Description: "Infrastructure configuration for a BedRock Minecraft Server image build."
+      Name: BedRockMinercraftInfrastructureConfiguration
+      InstanceTypes: []
+      SecurityGroupIds: []
+      TerminateInstanceOnFailure: true
+      Logging:
+        S3Logs: 
+          S3BucketName: !Ref SSMLoggingBucket
+          S3KeyPrefix: BedRockMinecraftServerImageBuilder
+    DependsOn: ImageBuilderInstanceProfile
+
+  BedRockMinecraftDistributionConfiguration:
+    Type: AWS::ImageBuilder::DistributionConfiguration
+    Properties:
+      Name: BedRockMinecraftDistributionConfiguration
+      Description: "Distribution configuration for BedRock Minecraft Server image build."
+      Distributions:
+        - AmiDistributionConfiguration:
+            Name: BedRockMinecraftServerImage {{imagebuilder:buildDate}}
+          Region: us-east-1
+
+  BedRockMinecraftSnortImagePipeline:
+    Type: AWS::ImageBuilder::ImagePipeline
+    Properties:
+      ImageRecipeArn: !Ref BedRockMinecraftServerImageRecipe
+      InfrastructureConfigurationArn: !Ref BedRockMinercraftInfrastructureConfiguration
+      DistributionConfigurationArn: !Ref BedRockMinecraftDistributionConfiguration
+      Name: BedRockMinecraftServerImagePipeline
+      Description: "Image Pipeline to build a Snort Sensor image."
+
+  ImageBuilderInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties: 
+      InstanceProfileName: ImageBuilderInstanceProfile
+      Roles: 
+        - !Ref ImageBuilderInstanceRole
+  
+  ImageBuilderInstanceRole:
+    Type: AWS::IAM::Role
+    Properties: 
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement: 
+          - 
+            Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/EC2InstanceProfileForImageBuilder

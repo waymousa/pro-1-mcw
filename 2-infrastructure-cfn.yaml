@@ -1,0 +1,228 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+
+  VPC1CidrBlock:
+    Type: String
+    Default: 10.0.0.0/16
+    Description: Enter a CIDR range for the VPC.
+
+  SN1CidrBlock:
+    Type: String
+    Default: 10.0.1.0/24
+    Description: Enter a CIDR range for the VPC.
+
+  LinuxImageId:
+    Type: String
+    Default: ami-07ebfd5b3428b6f4d
+    Description: Ubuntuu Linux 18.0.
+
+  MountPoint:
+    Type: String
+    Default: "/opt/bedrock-server"
+    Description: Ubuntuu Linux 18.0.
+  
+Mappings: {}
+
+Conditions: {}
+
+Outputs: {}
+
+Resources:
+
+  VPC1:
+    Type: 'AWS::EC2::VPC'
+    Properties: 
+      CidrBlock: !Ref VPC1CidrBlock
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      Tags:
+        - Key: Name
+          Value: minecraft-vpc
+  
+  SN1:
+    Type: 'AWS::EC2::Subnet'
+    Properties:
+      VpcId: !Ref VPC1
+      CidrBlock: !Ref SN1CidrBlock
+      Tags:
+        - Key: Name
+          Value: minecraft-pub-sn
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties: 
+      Tags:
+        - Key: Name
+          Value: minecraft-igw
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC1
+  
+  EIP:
+   DependsOn: InternetGatewayAttachment
+   Type: AWS::EC2::EIP
+   Properties:
+      Domain: vpc
+  
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC1
+      Tags: 
+        - Key: Name
+          Value: minecraft-pub-rt
+  
+  DefaultPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+  
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref SN1
+  
+  MineCraftServer:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      NetworkInterfaces:
+        - SubnetId: !Ref SN1
+          DeviceIndex: 0
+          GroupSet: 
+            - !Ref SG1
+      InstanceType: t2.medium
+      ImageId: !Ref LinuxImageId
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          apt-get update
+          apt-get upgrade -y
+      Tags: 
+        - 
+          Key: "Name"
+          Value: "MineCraftServer"
+        - 
+          Key: "SSMType"
+          Value: "MineCraftServer"
+        - 
+          Key: "SSMManaged"
+          Value: "True"
+      IamInstanceProfile: !Ref SSMInstanceProfile
+    DependsOn: MountTarget
+
+  MineCraftServerData:
+    Type: 'AWS::S3::Bucket'
+    Properties: {}
+  
+  SSMInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties: 
+      InstanceProfileName: SSMInstanceProfile
+      Roles: 
+        - !Ref SSMInstanceRole
+  
+  SSMInstanceRole:
+    Type: AWS::IAM::Role
+    Properties: 
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement: 
+          - 
+            Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+
+  SG1:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow all
+      VpcId: !Ref VPC1
+      Tags:
+        - Key: Name
+          Value: minecraft-srv-sg
+      SecurityGroupIngress:
+      - IpProtocol: udp
+        FromPort: 19132
+        ToPort: 19132
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: udp
+        FromPort: 25565
+        ToPort: 25565
+        CidrIp: 0.0.0.0/0
+  
+  SSMLoggingBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties: {}
+
+  MineCraftStart:
+    Type: 'AWS::SSM::Document'
+    Properties:
+      DocumentType: Automation
+      Content:
+        description: >-
+          # MineCraftStart
+
+          This document starts the MineCraft Server.
+        schemaVersion: '0.3'
+        parameters:
+          InstanceId: 
+            type: StringList
+        mainSteps:
+          - name: StartMineCraftServer
+            action: 'aws:runCommand'
+            inputs:
+              DocumentName: AWS-RunShellScript
+              InstanceIds:
+                - '{{InstanceId}}'
+              Parameters:
+                commands: 
+                  - >-
+                    sudo cd /opt/bedrock-server
+                  - sudo LD_LIBRARY_PATH=. ./bedrock_server
+            description: Starts the Minecraft Server
+
+  MineCraftELB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties: 
+      Name: minecraft-elb
+      Subnets: 
+        - !Ref SN1
+      Type: network
+      Tags:
+        - Key: Name
+          Value: minecraft-elb
+
+  LoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref MineCraftELB
+      Port: 19132
+      Protocol: UDP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref DefaultTargetGroup
+  
+  DefaultTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: minecraft-tg
+      VpcId: !Ref VPC1
+      Port: 19132
+      Protocol: UDP
+      HealthCheckPort: 80
+      HealthCheckProtocol: TCP
+      Targets: 
+        - Id: !Ref MineCraftServer
+          Port: 19132
